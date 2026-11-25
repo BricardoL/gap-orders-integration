@@ -45,11 +45,12 @@ private class OrdersWebhookTest {
         req.requestBody=Blob.valueOf(body);
         req.addHeader('Orders-Signature', EncodingUtil.convertToHex(
             Crypto.generateMac('HmacSHA256', req.requestBody, Blob.valueOf(valid ? SECRET : 'wrong'))));
-        RestContext.request=req;
+        return invoke(req);
+    }
+    private static String invoke(RestRequest request) {
+        RestContext.request=request;
         RestContext.response=new RestResponse();
         OrdersWebhook.receive();
-        Assert.areNotEqual('readUnavailable', (String)((Map<String,Object>)JSON.deserializeUntyped(
-            RestContext.response.responseBody.toString())).get('outcome'), RestContext.response.responseBody.toString());
         return (String)((Map<String,Object>)JSON.deserializeUntyped(
             RestContext.response.responseBody.toString())).get('outcome');
     }
@@ -121,6 +122,116 @@ private class OrdersWebhookTest {
             Assert.areEqual(200,RestContext.response.statusCode);
             Assert.areEqual(1,[SELECT COUNT() FROM External_Order__c]);
             Assert.areEqual('duplicate',deliver(payload('leastPrivilege','sent','2026-10-12T10:00:00Z','ord_min'),true));
+        }
+    }
+    @IsTest static void unchangedOffsetsAndReturnedAfterCleared() {
+        Assert.areEqual('applied',deliver(payload('first','sent','2026-10-12T14:00:00Z','ord_1'),true));
+        Assert.areEqual('unchanged',deliver(payload('equivalent','sent','2026-10-12T08:00:00-06:00','ord_1'),true));
+        External_Order__c order=[SELECT Last_Event_Id__c FROM External_Order__c LIMIT 1];
+        Assert.areEqual('first',order.Last_Event_Id__c);
+        Assert.areEqual('applied',deliver(payload('refresh','sent','2026-10-12T15:00:00.000Z','ord_1'),true));
+        Assert.areEqual('applied',deliver(payload('cleared','cleared','2026-10-12T16:00:00Z','ord_1'),true));
+        Assert.areEqual('applied',deliver(payload('returned','returned','2026-10-12T17:00:00Z','ord_1'),true));
+        order=[SELECT Status__c,Last_Event_Id__c FROM External_Order__c LIMIT 1];
+        Assert.areEqual('returned',order.Status__c);
+        Assert.areEqual('returned',order.Last_Event_Id__c);
+    }
+    @IsTest static void invalidContractAndAmbiguousTimestamps() {
+        String valid=payload('validation','sent','2026-10-12T14:00:00Z','ord_1');
+        for (String invalid : new List<String>{
+            valid.replace('sub_a1b2c3d4e5f67890abcdef12','SUB_a1b2c3d4e5f67890abcdef12'),
+            valid.replace('sub_a1b2c3d4e5f67890abcdef12','sub_unknown'),
+            valid.replace('"1.0"','"2.0"'),
+            valid.replace('"ord_1"','" ord_1"'),
+            valid.replace('"validation"','"validation "'),
+            valid.replace('2026-10-12T14:00:00Z','2026-10-12'),
+            valid.replace('2026-10-12T14:00:00Z','2026-10-12T14:00:00'),
+            valid.replace('2026-10-12T14:00:00Z','2026-99-12T14:00:00Z')
+        }) {
+            Assert.areEqual('invalidEvent',deliver(invalid,true));
+            Assert.areEqual(400,RestContext.response.statusCode);
+        }
+        Assert.areEqual(0,[SELECT COUNT() FROM Account]);
+        Assert.areEqual(0,[SELECT COUNT() FROM Order_Event_Receipt__c]);
+    }
+    @IsTest static void missingSignatureAndOversizeBody() {
+        RestRequest request=new RestRequest();
+        request.requestBody=Blob.valueOf(payload('unsigned','sent','2026-10-12T14:00:00Z','ord_1'));
+        Assert.areEqual('invalidSignature',invoke(request));
+        Assert.areEqual(403,RestContext.response.statusCode);
+        request.requestBody=Blob.valueOf('x'.repeat(16385));
+        Assert.areEqual('invalidBody',invoke(request));
+        Assert.areEqual(400,RestContext.response.statusCode);
+        Assert.areEqual(0,[SELECT COUNT() FROM Order_Event_Receipt__c]);
+    }
+    @IsTest static void publishedHmacVectorAndChangedBody() {
+        Blob body=Blob.valueOf('what do ya want for nothing?');
+        String signature='5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843';
+        Assert.isTrue(OrdersSignature.isValid(body,signature,'Jefe'));
+        Assert.isTrue(OrdersSignature.isValid(body,signature.toUpperCase(),'Jefe'));
+        Assert.isFalse(OrdersSignature.isValid(Blob.valueOf('what do ya want for nothing? '),signature,'Jefe'));
+        Assert.isFalse(OrdersSignature.isValid(body,signature,'wrong'));
+    }
+    @IsTest static void failedOrderWriteRollsBackAndCanBeRetried() {
+        PermissionSet fullAccess=[SELECT Id FROM PermissionSet WHERE Name='Orders_Integration'];
+        PermissionSet limitedAccess=new PermissionSet(Name='Orders_Rollback_Test',
+            Label='Orders Rollback Test',PermissionsViewEncryptedData=true);
+        insert as system limitedAccess;
+        List<ObjectPermissions> objects=[SELECT SobjectType,PermissionsRead,PermissionsCreate,
+            PermissionsEdit,PermissionsDelete,PermissionsViewAllRecords,PermissionsModifyAllRecords
+            FROM ObjectPermissions WHERE ParentId=:fullAccess.Id];
+        for (ObjectPermissions permission : objects) {
+            permission.Id=null;
+            permission.ParentId=limitedAccess.Id;
+            if (permission.SobjectType=='External_Order__c') {
+                permission.PermissionsCreate=false;
+                permission.PermissionsEdit=false;
+            }
+        }
+        insert as system objects;
+        List<FieldPermissions> fields=[SELECT SobjectType,Field,PermissionsRead,PermissionsEdit
+            FROM FieldPermissions WHERE ParentId=:fullAccess.Id];
+        for (FieldPermissions permission : fields) {
+            permission.Id=null;
+            permission.ParentId=limitedAccess.Id;
+            if (permission.SobjectType=='External_Order__c') permission.PermissionsEdit=false;
+        }
+        insert as system fields;
+        User limitedUser=new User(Alias='ordfail',LastName='Orders Rollback Test',
+            Email='rollback@example.invalid',
+            Username=UserInfo.getOrganizationId()+'.'+Datetime.now().getTime()+'@rollback.example.invalid',
+            ProfileId=[SELECT Id FROM Profile WHERE Name='Minimum Access - Salesforce' LIMIT 1].Id,
+            TimeZoneSidKey='America/El_Salvador',LocaleSidKey='en_US',
+            EmailEncodingKey='UTF-8',LanguageLocaleKey='en_US');
+        insert as system limitedUser;
+        insert as system new PermissionSetAssignment(AssigneeId=limitedUser.Id,PermissionSetId=limitedAccess.Id);
+        User principal=[SELECT Id FROM User WHERE Alias='ordertst' LIMIT 1];
+        System.runAs(new User(Id=UserInfo.getUserId())) {
+            Orders_Configuration__c configuration=[SELECT Id FROM Orders_Configuration__c LIMIT 1];
+            configuration.OwnerId=limitedUser.Id;
+            update configuration;
+        }
+        String body=payload('retry_after_failure','sent','2026-10-12T14:00:00Z','ord_retry');
+        System.runAs(limitedUser) {
+            Assert.isFalse(Schema.sObjectType.External_Order__c.isCreateable());
+            Assert.isTrue(Schema.sObjectType.Account.isCreateable());
+            Assert.isTrue(Schema.sObjectType.Order_Event_Receipt__c.isCreateable());
+            Assert.areEqual('processingFailed',deliver(body,true));
+            Assert.areEqual(500,RestContext.response.statusCode);
+            Assert.areEqual(0,[SELECT COUNT() FROM Account]);
+            Assert.areEqual(0,[SELECT COUNT() FROM External_Order__c]);
+            Assert.areEqual(0,[SELECT COUNT() FROM Order_Event_Receipt__c]);
+        }
+        System.runAs(new User(Id=UserInfo.getUserId())) {
+            Orders_Configuration__c configuration=[SELECT Id FROM Orders_Configuration__c LIMIT 1];
+            configuration.OwnerId=principal.Id;
+            update configuration;
+        }
+        System.runAs(principal) {
+            Assert.areEqual('applied',deliver(body,true));
+            Assert.areEqual(1,[SELECT COUNT() FROM Account]);
+            Assert.areEqual(1,[SELECT COUNT() FROM External_Order__c]);
+            Assert.areEqual(1,[SELECT COUNT() FROM Order_Event_Receipt__c]);
         }
     }
 }

@@ -12,6 +12,8 @@ public with sharing class OrdersEventService {
         'sent'=>3, 'cleared'=>4, 'returned'=>5
     };
     public static Result process(OrdersEvent message, String digest) {
+        Datetime eventTime = message.timestamp();
+        String newStatus = message.status();
         List<Order_Event_Receipt__c> existing = [
             SELECT Id, Body_Digest__c FROM Order_Event_Receipt__c
             WHERE Event_Id__c = :message.event.id LIMIT 1
@@ -22,7 +24,7 @@ public with sharing class OrdersEventService {
         // The unique receipt prevents two requests from processing the same event.
         Order_Event_Receipt__c receipt = new Order_Event_Receipt__c(
             Event_Id__c=message.event.id, Order_Id__c=message.data.orderId,
-            Event_Type__c=message.event.type, Occurred_At__c=message.timestamp(),
+            Event_Type__c=message.event.type, Occurred_At__c=eventTime,
             Body_Digest__c=digest
         );
         insert receipt;
@@ -50,15 +52,15 @@ public with sharing class OrdersEventService {
             if (accounts.isEmpty() || order.Account__c != accounts[0].Id) {
                 outcome = 'conflict';
                 receipt.Detail__c = 'Order account reassignment is not allowed.';
-            } else if (message.timestamp() < order.Last_Event_At__c) {
+            } else if (eventTime < order.Last_Event_At__c) {
                 outcome = 'stale';
-            } else if (message.timestamp() == order.Last_Event_At__c) {
-                outcome = message.status() == order.Status__c ? 'unchanged' : 'conflict';
+            } else if (eventTime == order.Last_Event_At__c) {
+                outcome = newStatus == order.Status__c ? 'unchanged' : 'conflict';
                 receipt.Detail__c = 'Equal event timestamps; current state preserved.';
-            } else if (RANK.get(message.status()) < RANK.get(order.Status__c)) {
+            } else if (RANK.get(newStatus) < RANK.get(order.Status__c)) {
                 outcome = 'conflict';
                 receipt.Detail__c = 'Status regression; current state preserved.';
-            } else if (message.status() == 'returned'
+            } else if (newStatus == 'returned'
                 && order.Status__c != 'sent' && order.Status__c != 'cleared'
                 && order.Status__c != 'returned') {
                 // An intermediate status may be missing, so the later returned event is accepted.
@@ -66,8 +68,8 @@ public with sharing class OrdersEventService {
             }
         }
         if (outcome == 'applied') {
-            order.Status__c = message.status();
-            order.Last_Event_At__c = message.timestamp();
+            order.Status__c = newStatus;
+            order.Last_Event_At__c = eventTime;
             order.Last_Event_Id__c = message.event.id;
             upsert order;
         }

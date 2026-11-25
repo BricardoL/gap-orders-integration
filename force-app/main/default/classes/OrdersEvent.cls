@@ -16,6 +16,10 @@ public with sharing class OrdersEvent {
     }
     public class InvalidEventException extends Exception {}
     public Datetime timestamp() {
+        if (event == null || String.isBlank(event.occurredAt)
+            || !Pattern.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?(Z|[+-][0-9]{2}:[0-9]{2})$', event.occurredAt)) {
+            throw new InvalidEventException('occurredAt must include a time and an explicit timezone.');
+        }
         try {
             return (Datetime) JSON.deserialize(JSON.serialize(event.occurredAt), Datetime.class);
         } catch (Exception ex) {
@@ -27,13 +31,13 @@ public with sharing class OrdersEvent {
     }
     public void validate(String subscription) {
         if (event == null || data == null || String.isBlank(subscriptionId)
-            || subscriptionId != subscription || event.version != '1.0') {
+            || !subscriptionId.equals(subscription) || event.version != '1.0') {
             throw new InvalidEventException('Unsupported subscription, version, or envelope.');
         }
         for (String value : new List<String>{event.id, data.orderId, data.accountId,
             data.orderFriendlyId, data.accountFriendlyId}) {
-            if (String.isBlank(value) || value.length() > 100) {
-                throw new InvalidEventException('Identifiers must contain 1 to 100 characters.');
+            if (String.isBlank(value) || value.length() > 100 || !value.equals(value.trim())) {
+                throw new InvalidEventException('Identifiers require 1 to 100 characters without surrounding whitespace.');
             }
         }
         if (!new Set<String>{'order.inProgress','order.waitingForParticipant',

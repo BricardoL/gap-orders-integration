@@ -106,6 +106,7 @@ An existing event ID with the same body digest is a duplicate. The same ID with 
 
 Ordering is per order using `occurredAt`:
 
+- Timestamps must include a full time and an explicit timezone, such as `2026-10-12T14:00:00Z` or `2026-10-12T08:00:00-06:00`. Optional fractional seconds support up to three digits. Date-only values and timestamps without a timezone are rejected.
 - Older event: record `stale` and preserve the order.
 - Equal timestamp: record `unchanged` for the same status or `conflict` for a different status.
 - Newer event: accept forward movement or the same status; record regressions as conflicts.
@@ -140,7 +141,7 @@ Business conflicts receive 200 because replaying the same contradictory event wi
 | Can an order move Accounts? | No; record a conflict rather than silently moving it. |
 | Are IDs globally unique and case-sensitive? | Yes; use unique case-sensitive external IDs, consistent with the event uniqueness contract. |
 | Are redeliveries byte-identical? | Yes. Raw-body digests detect ID reuse; otherwise an agreed semantic digest/canonicalization would be needed. |
-| Which subscriptions are allowed? | One configured subscription so a valid signature alone does not authorize another subscription. |
+| Which subscriptions are allowed? | One configured subscription, matched exactly including case, so a valid signature alone does not authorize another subscription. |
 | Is historical backfill required? | No initial backfill. Event-only ingestion cannot discover orders that never emit another event. |
 | Who handles failed deliveries and suspended subscriptions? | An operator for this version, using sender/Salesforce logs and receipt inspection before resubmission. |
 | How long should receipts remain? | Keep them for the exercise. Production retention must cover the replay window; deleting receipts weakens replay protection. |
@@ -150,7 +151,9 @@ Business conflicts receive 200 because replaying the same contradictory event wi
 
 ## Testing and scope
 
-Apex tests cover the sample and replay, unique stale events for the same order, independent order timestamps, timestamp conflicts, regressions, returned states, malformed input, signature failures, missing configuration/body, event-ID reuse, Account reassignment, and a Minimum Access integration user. Tests use isolated data. Sequential tests do not prove simultaneous-request behavior; concurrency testing remains follow-up work.
+Apex tests cover the sample and replay, stale events, equivalent timezone offsets, timestamp conflicts, regressions, returned states, malformed input, unsupported subscriptions/versions, signature failures, oversized bodies, event-ID reuse, Account reassignment, and a Minimum Access integration user. HMAC verification is also checked against the independent [RFC 4231 test case 2](https://www.rfc-editor.org/rfc/rfc4231.txt).
+
+A restricted-user test allows Account and receipt creation but denies order creation. It verifies that the failed request leaves no Account, order, or receipt, and that the same event can then succeed with the proper permissions. Tests use isolated data. Sequential tests do not prove simultaneous-request behavior, so concurrency testing remains follow-up work.
 
 Deliberately left out:
 
