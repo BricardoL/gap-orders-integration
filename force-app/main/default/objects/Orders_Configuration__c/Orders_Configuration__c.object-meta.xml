@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<CustomObject xmlns="http://soap.sforce.com/2006/04/metadata">
+    <deploymentStatus>Deployed</deploymentStatus>
+    <label>Orders Configuration</label>
+    <nameField>
+        <displayFormat>REC-{00000}</displayFormat>
+        <label>Orders Configuration Number</label>
+        <type>AutoNumber</type>
+    </nameField>
+    <pluralLabel>Orders Configurations</pluralLabel>
+    <sharingModel>Private</sharingModel>
+</CustomObject>

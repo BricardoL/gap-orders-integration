@@ -1,0 +1,7 @@
+# Package manifest is supplied separately from deployable source.
+package.xml
+
+# Local state and editor settings
+.sf/
+.sfdx/
+.vscode/

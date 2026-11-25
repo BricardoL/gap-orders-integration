@@ -1,0 +1,4 @@
+SELECT Id, Name, Orders_Account_Id__c, Orders_Friendly_Id__c
+FROM Account
+WHERE Orders_Account_Id__c != null
+ORDER BY Orders_Account_Id__c

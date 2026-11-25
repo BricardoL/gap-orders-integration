@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<CustomApplication xmlns="http://soap.sforce.com/2006/04/metadata">
+    <description>Orders status integration and event receipts</description>
+    <formFactors>Large</formFactors>
+    <label>Orders Integration</label>
+    <navType>Standard</navType>
+    <tabs>standard-Account</tabs>
+    <tabs>External_Order__c</tabs>
+    <tabs>Order_Event_Receipt__c</tabs>
+    <uiType>Lightning</uiType>
+</CustomApplication>

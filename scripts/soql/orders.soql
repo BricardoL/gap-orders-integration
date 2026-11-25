@@ -1,0 +1,4 @@
+SELECT External_Id__c, Friendly_Id__c, Status__c, Last_Event_At__c,
+       Last_Event_Id__c, Account__r.Name
+FROM External_Order__c
+ORDER BY External_Id__c

@@ -1,0 +1,21 @@
+# Local Salesforce state and credentials
+.sf/
+.sfdx/
+.localdevserver/
+deploy-options.json
+
+# Local editor settings
+.vscode/
+
+# Logs and local secrets
+logs/
+*.log
+.env
+.env.*
+
+# Operating system files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/

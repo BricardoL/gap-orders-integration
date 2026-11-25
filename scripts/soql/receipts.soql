@@ -1,0 +1,4 @@
+SELECT Event_Id__c, Order_Id__c, Event_Type__c, Occurred_At__c,
+       Outcome__c, Detail__c
+FROM Order_Event_Receipt__c
+ORDER BY Event_Id__c
